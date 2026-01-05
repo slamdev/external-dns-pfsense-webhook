@@ -42,6 +42,20 @@ assemble-multiplatform:
 
 build: assemble verify
 
+TAG ?= latest
+docker: assemble-multiplatform
+	docker buildx build \
+      --platform linux/amd64,linux/arm64 \
+      --push --pull --progress=plain \
+      --tag "ghcr.io/slamdev/external-dns-pfsense-webhook:$(TAG)" \
+      --label 'org.opencontainers.image.source=https://github.com/slamdev/external-dns-pfsense-webhook' \
+      --label 'org.opencontainers.image.description=external-dns-pfsense-webhook' \
+      --label 'org.opencontainers.image.licenses=Apache-2.0' \
+      --annotation 'org.opencontainers.image.source=https://github.com/slamdev/external-dns-pfsense-webhook' \
+      --annotation 'org.opencontainers.image.description=external-dns-pfsense-webhook' \
+      --annotation 'org.opencontainers.image.licenses=Apache-2.0' \
+      .
+
 mod:
 	go mod tidy
 	go mod verify

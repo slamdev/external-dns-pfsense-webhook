@@ -3,6 +3,7 @@ package business
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"strings"
 
 	"github.com/slamdev/external-dns-pfsense-webhook/api/externaldnsapi"
@@ -44,6 +45,8 @@ func (c *controller) GetRecords(ctx context.Context, _ externaldnsapi.GetRecords
 func (c *controller) SetRecords(ctx context.Context, request externaldnsapi.SetRecordsRequestObject) (externaldnsapi.SetRecordsResponseObject, error) {
 	var hostsToCreate, hostsToUpdate, hostsToDelete []svc.UnboundHost
 	var err error
+
+	slog.InfoContext(ctx, "external-dns wants to set records", slog.String("records", integration.ToUnsafeJSONString(request.Body)))
 
 	if request.Body.Create != nil {
 		hostsToCreate, err = integration.MapSliceErr(*request.Body.Create, c.asUnboundHost)
