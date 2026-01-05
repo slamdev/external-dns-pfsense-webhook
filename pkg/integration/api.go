@@ -68,7 +68,7 @@ func createAndRecordProblemDetail(ctx context.Context, status int, err error) Pr
 		Instance: requestURI,
 		Status:   status,
 		Title:    title,
-		TraceId:  traceID,
+		TraceID:  traceID,
 		Type:     "about:blank",
 		Detail:   errText,
 	}
@@ -83,6 +83,6 @@ type ProblemDetailV1 struct {
 	Instance string `json:"instance"`
 	Status   int    `json:"status"`
 	Title    string `json:"title"`
-	TraceId  string `json:"traceId"`
+	TraceID  string `json:"traceId"`
 	Type     string `json:"type"`
 }

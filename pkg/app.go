@@ -53,7 +53,7 @@ func NewApp() (App, error) {
 
 	app.configureHealthChecker()
 
-	pfsenseSvc := svc.NewPfsenseService(app.pfsenseClient)
+	pfsenseSvc := svc.NewPfsenseService(app.pfsenseClient, app.config.DryRun)
 
 	webhookController := business.NewController(pfsenseSvc)
 	webhookMux := http.NewServeMux()

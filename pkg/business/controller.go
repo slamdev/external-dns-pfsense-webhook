@@ -29,7 +29,7 @@ func (c *controller) Negotiate(_ context.Context, _ externaldnsapi.NegotiateRequ
 	}, nil
 }
 
-func (c *controller) GetRecords(ctx context.Context, request externaldnsapi.GetRecordsRequestObject) (externaldnsapi.GetRecordsResponseObject, error) {
+func (c *controller) GetRecords(ctx context.Context, _ externaldnsapi.GetRecordsRequestObject) (externaldnsapi.GetRecordsResponseObject, error) {
 	hosts, err := c.pfsenseService.ListHosts(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list unbound hosts; %w", err)

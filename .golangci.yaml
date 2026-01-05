@@ -154,6 +154,8 @@ linters:
           disabled: true
         - name: blank-imports
           disabled: true
+        - name: nested-structs
+          disabled: true
     sloglint:
       # Enforce using methods that accept a context.
       # Values:

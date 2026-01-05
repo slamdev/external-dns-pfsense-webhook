@@ -31,6 +31,7 @@ type Config struct {
 		Password string
 		Insecure bool
 	}
+	DryRun bool
 }
 
 type URL url.URL

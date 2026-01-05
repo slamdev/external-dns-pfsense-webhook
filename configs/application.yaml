@@ -15,3 +15,4 @@ pfsense:
   insecure: true
   username: admin
   password: admin
+dryRun: true

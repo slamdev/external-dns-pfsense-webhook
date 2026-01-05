@@ -2,7 +2,10 @@ package svc
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"log/slog"
+	"slices"
 
 	"alexejk.io/go-xmlrpc"
 	"github.com/slamdev/external-dns-pfsense-webhook/pkg/integration"
@@ -12,16 +15,18 @@ const unboundConfigSection string = "unbound"
 
 type pfsenseService struct {
 	client *xmlrpc.Client
+	dryRun bool
 }
 
 type PfsenseService interface {
 	ListHosts(ctx context.Context) ([]UnboundHost, error)
-	ApplyHostsChanges(ctx context.Context, create []UnboundHost, update []UnboundHost, delete []UnboundHost) error
+	ApplyHostsChanges(ctx context.Context, toCreate []UnboundHost, toUpdate []UnboundHost, toDelete []UnboundHost) error
 }
 
-func NewPfsenseService(client *xmlrpc.Client) PfsenseService {
+func NewPfsenseService(client *xmlrpc.Client, dryRun bool) PfsenseService {
 	return &pfsenseService{
 		client: client,
+		dryRun: dryRun,
 	}
 }
 
@@ -42,15 +47,98 @@ func (s *pfsenseService) fetchUnboundSection() (Unbound, error) {
 	return res.Nested.Unbound, nil
 }
 
-func (s *pfsenseService) ApplyHostsChanges(_ context.Context, create []UnboundHost, update []UnboundHost, delete []UnboundHost) error {
-	//TODO implement me
-	panic("implement me")
+func (s *pfsenseService) ApplyHostsChanges(ctx context.Context, toCreate []UnboundHost, toUpdate []UnboundHost, toDelete []UnboundHost) error {
+	if len(toCreate) == 0 && len(toUpdate) == 0 && len(toDelete) == 0 {
+		return nil
+	}
+
+	section, err := s.fetchUnboundSection()
+	if err != nil {
+		return fmt.Errorf("failed to fetch unbound section; %w", err)
+	}
+	var finalHosts []UnboundHost
+	for _, existingHost := range section.Hosts {
+		// do not add an existing host for final host if it is marked for deletion
+		if slices.ContainsFunc(toDelete, func(host UnboundHost) bool {
+			return host.Host == existingHost.Host && host.Domain == existingHost.Domain
+		}) {
+			continue
+		}
+
+		// replace existing host with updated host if it is marked for toUpdate
+		updateIndex := slices.IndexFunc(toUpdate, func(host UnboundHost) bool {
+			return host.Host == existingHost.Host && host.Domain == existingHost.Domain
+		})
+		if updateIndex != -1 {
+			existingHost = toUpdate[updateIndex]
+		}
+
+		finalHosts = append(finalHosts, existingHost)
+
+		// remove entry from created hosts if it already exists
+		createIndex := slices.IndexFunc(toCreate, func(host UnboundHost) bool {
+			return host.Host == existingHost.Host && host.Domain == existingHost.Domain
+		})
+		if createIndex != -1 {
+			toCreate = append(toCreate[:createIndex], toCreate[createIndex+1:]...)
+		}
+	}
+	// add remaining created hosts
+	finalHosts = append(finalHosts, toCreate...)
+
+	section.Hosts = finalHosts
+
+	if s.dryRun {
+		slog.InfoContext(ctx, "dry run enabled, not applying changes to pfsense",
+			slog.String("create", integration.ToUnsafeJSONString(toCreate)),
+			slog.String("update", integration.ToUnsafeJSONString(toUpdate)),
+			slog.String("delete", integration.ToUnsafeJSONString(toDelete)),
+			slog.String("final", integration.ToUnsafeJSONString(section.Hosts)),
+		)
+		return nil
+	}
+
+	if err := s.saveUnboundSection(section); err != nil {
+		return fmt.Errorf("failed to save unbound section; %w", err)
+	}
+	return nil
+}
+
+func (s *pfsenseService) saveUnboundSection(section Unbound) error {
+	req := &integration.NestedXMLRPC[UnboundStruct]{Nested: UnboundStruct{Unbound: section}}
+	res := &integration.OperationResult{}
+	if err := s.client.Call("pfsense.restore_config_section", req, res); err != nil {
+		return fmt.Errorf("failed to call %s; %w", "restore_config_section", err)
+	}
+	if !res.Success {
+		return errors.New("pfsense return 'false' as a result of config restoring")
+	}
+	if err := s.execPhp("$toreturn = services_unbound_configure(false);"); err != nil {
+		return errors.New("failed to exec php to configure unbound")
+	}
+	if err := s.execPhp("$toreturn = services_dhcpd_configure();"); err != nil {
+		return errors.New("failed to exec php to configure dhcpd")
+	}
+	return nil
+}
+
+func (s *pfsenseService) execPhp(code string) error {
+	req := &struct{ Data string }{Data: code}
+	res := &integration.OperationResult{}
+	if err := s.client.Call("pfsense.exec_php", req, res); err != nil {
+		return fmt.Errorf("failed to exec php; %w", err)
+	}
+	if !res.Success {
+		return errors.New("pfsense return 'false' as a result of exec php")
+	}
+	return nil
 }
 
 type UnboundStruct struct {
 	Unbound Unbound `xml:"unbound"`
 }
 
+//nolint:revive,staticcheck
 type Unbound struct {
 	Enable                    string        `xml:"enable"`
 	Dnssec                    string        `xml:"dnssec"`
@@ -82,6 +170,7 @@ type Unbound struct {
 	Forwarding                string        `xml:"forwarding"`
 }
 
+//nolint:revive,staticcheck
 type UnboundHost struct {
 	Host    string `xml:"host"`
 	Domain  string `xml:"domain"`
@@ -90,6 +179,7 @@ type UnboundHost struct {
 	Aliases string `xml:"aliases"`
 }
 
+//nolint:revive,staticcheck
 type UnboundAcl struct {
 	Aclid       string          `xml:"aclid"`
 	Aclname     string          `xml:"aclname"`
@@ -98,6 +188,7 @@ type UnboundAcl struct {
 	Row         []UnboundAclRow `xml:"row"`
 }
 
+//nolint:revive,staticcheck
 type UnboundAclRow struct {
 	AclNetwork  string `xml:"acl_network"`
 	Mask        string `xml:"mask"`

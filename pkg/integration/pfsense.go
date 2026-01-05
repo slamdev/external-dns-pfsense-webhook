@@ -11,6 +11,7 @@ import (
 )
 
 func CreatePfsenseClient(url string, username string, password string, insecure bool) (*xmlrpc.Client, error) {
+	//nolint:gosec
 	httpClient := NewHTTPClientWithTLS("pfsense", &tls.Config{InsecureSkipVerify: insecure})
 	headers := map[string]string{
 		"Authorization": "Basic " + base64.StdEncoding.EncodeToString([]byte(username+":"+password)),
@@ -26,7 +27,7 @@ func CreatePfsenseClient(url string, username string, password string, insecure 
 func PfsenseHealthCheck(client *xmlrpc.Client) health.Check {
 	return health.Check{
 		Name: "pfsense",
-		Check: func(ctx context.Context) error {
+		Check: func(_ context.Context) error {
 			req := &struct {
 				Dummy   string
 				Timeout int
@@ -59,4 +60,8 @@ type hostFirmwareVersionResponse struct {
 	}
 	Platform      string
 	ConfigVersion string
+}
+
+type OperationResult struct {
+	Success bool
 }

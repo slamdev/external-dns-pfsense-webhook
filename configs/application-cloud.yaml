@@ -6,3 +6,4 @@ telemetry:
     output: remote
   traces:
     output: remote
+dryRun: false
