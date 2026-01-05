@@ -1,0 +1,8 @@
+telemetry:
+  logs:
+    level: INFO
+    format: json
+  metrics:
+    output: remote
+  traces:
+    output: remote

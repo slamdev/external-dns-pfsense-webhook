@@ -1,0 +1,13 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/oapi-codegen/oapi-codegen/v2.5.0/configuration-schema.json
+package: externaldnsapi
+generate:
+  client: true
+  std-http-server: true
+  strict-server: true
+  embedded-spec: true
+  models: true
+output: api.gen.go
+compatibility:
+  always-prefix-enum-values: true
+output-options:
+  prefer-skip-optional-pointer-on-container-types: true

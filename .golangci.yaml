@@ -1,0 +1,249 @@
+version: "2"
+run:
+  modules-download-mode: readonly
+linters:
+  default: all
+  disable:
+    - cyclop
+    - decorder
+    - depguard
+    - dupl
+    - err113
+    - exhaustruct
+    - forcetypeassert
+    - funlen
+    - gochecknoglobals
+    - gocognit
+    - gocyclo
+    - godot
+    - godox
+    - gomoddirectives
+    - grouper
+    - interfacebloat
+    - ireturn
+    - lll
+    - mnd
+    - nestif
+    - nlreturn
+    - nolintlint # different behavour in mac&linux
+    - nonamedreturns
+    - perfsprint
+    - prealloc
+    - testpackage
+    - thelper
+    - unparam
+    - varnamelen
+    - wsl
+    - funcorder
+    - embeddedstructfieldcheck
+    - noinlineerr
+    - wsl_v5
+  settings:
+    godoclint:
+      disable:
+        - start-with-name
+    copyloopvar:
+      # Check all assigning the loop variable to another variable.
+      # Default: false
+      check-alias: true
+    errcheck:
+      check-blank: true
+      exclude-functions:
+        - encoding/json.Marshal
+        - encoding/json.MarshalIndent
+    errchkjson:
+      # With check-error-free-encoding set to true, errchkjson does warn about errors
+      # from json encoding functions that are safe to be ignored,
+      # because they are not possible to happen.
+      #
+      # if check-error-free-encoding is set to true and errcheck linter is enabled,
+      # it is recommended to add the following exceptions to prevent from false positives:
+      #
+      #     linters-settings:
+      #       errcheck:
+      #         exclude-functions:
+      #           - encoding/json.Marshal
+      #           - encoding/json.MarshalIndent
+      #
+      # Default: false
+      check-error-free-encoding: true
+      # Issue on struct encoding that doesn't have exported fields.
+      # Default: false
+      report-no-exported: true
+    exhaustive:
+      check:
+        - switch
+        - map
+      # Presence of "default" case in switch statements satisfies exhaustiveness,
+      # even if all enum members are not listed.
+      # Default: false
+      default-signifies-exhaustive: true
+    gocritic:
+      enable-all: true
+      disabled-checks:
+        - commentFormatting
+        - hugeParam
+        - paramTypeCombine
+        - unnamedResult
+        - commentedOutCode
+        - nestingReduce
+        - rangeValCopy
+        - whyNoLint
+        - stringConcatSimplify
+    gosec:
+      excludes:
+        - G115 # https://github.com/moby/moby/issues/48358#issuecomment-2323339603
+    govet:
+      # Disable analyzers by name.
+      # (in addition to default
+      #   atomicalign, deepequalerrors, fieldalignment, findcall, nilness, reflectvaluecompare, shadow, sortslice,
+      #   timeformat, unusedwrite
+      # ).
+      # Run `GL_DEBUG=govet golangci-lint run --enable=govet` to see default, all available analyzers, and enabled analyzers.
+      # Default: []
+      disable:
+        - fieldalignment
+        - shadow
+        - slog
+      # Enable all analyzers.
+      # Default: false
+      enable-all: true
+    loggercheck:
+      # Require printf-like format specifier (%s, %d for example) not present.
+      # Default: false
+      no-printf-like: true
+    revive:
+      # Sets the default failure confidence.
+      # This means that linting errors with less than 0.8 confidence will be ignored.
+      # Default: 0.8
+      confidence: 0.1
+      # Enable all available rules.
+      # Default: false
+      enable-all-rules: true
+      rules:
+        - name: cyclomatic
+          disabled: true
+        - name: line-length-limit
+          disabled: true
+        - name: add-constant
+          disabled: true
+        - name: confusing-results
+          disabled: true
+        - name: function-result-limit
+          disabled: true
+        - name: cognitive-complexity
+          disabled: true
+        - name: modifies-parameter
+          disabled: true
+        - name: flag-parameter
+          disabled: true
+        - name: unused-receiver
+          disabled: true
+        - name: unchecked-type-assertion
+          disabled: true
+        - name: function-length
+          disabled: true
+        - name: comment-spacings
+          disabled: true
+        - name: exported
+          arguments:
+            - disableStutteringCheck
+        - name: max-public-structs
+          disabled: true
+        - name: confusing-naming
+          disabled: true
+        - name: blank-imports
+          disabled: true
+    sloglint:
+      # Enforce using methods that accept a context.
+      # Values:
+      # - "": disabled
+      # - "all": report all contextless calls
+      # - "scope": report only if a context exists in the scope of the outermost function
+      # Default: ""
+      context: scope
+      # Enforce a single key naming convention.
+      # Values: snake, kebab, camel, pascal
+      # Default: ""
+      key-naming-case: camel
+    staticcheck:
+      # SAxxxx checks in https://staticcheck.io/docs/configuration/options/#checks
+      # Default: ["*"]
+      checks:
+        - all
+        - -S1016
+    testifylint:
+      # Enable all checkers (https://github.com/Antonboom/testifylint#checkers).
+      # Default: false
+      enable-all: true
+      # Disable checkers by name
+      # (in addition to default
+      #   suite-thelper
+      # ).
+      disable:
+        - require-error
+    unused:
+      # Mark all struct fields that have been written to as used.
+      # Default: true
+      field-writes-are-uses: false
+      # Mark all exported fields as used.
+      # default: true
+      exported-fields-are-used: false
+      # Mark all function parameters as used.
+      # default: true
+      parameters-are-used: true
+      # Mark all local variables as used.
+      # default: true
+      local-variables-are-used: false
+    usetesting:
+      # context-background: false
+      # context-todo: false
+    wrapcheck:
+      # An array of strings that specify substrings of signatures to ignore.
+      # If this set, it will override the default set of ignored signatures.
+      # See https://github.com/tomarrell/wrapcheck#configuration for more information.
+      # Default: [".Errorf(", "errors.New(", "errors.Unwrap(", "errors.Join(", ".Wrap(", ".Wrapf(", ".WithMessage(", ".WithMessagef(", ".WithStack("]
+      ignore-sigs:
+        - integration.NewAPIClientHTTPError(
+        - integration.NewTemporalBusinessError(
+        - integration.NewTemporalNonRetryableBusinessError(
+        - temporal.NewApplicationErrorWithCause(
+        - temporal.NewNonRetryableApplicationError(
+        - .Errorf(
+        - errors.New(
+        - errors.Unwrap(
+        - errors.Join(
+        - .Wrap(
+        - .Wrapf(
+        - .WithMessage(
+        - .WithMessagef(
+        - .WithStack(
+  exclusions:
+    generated: lax
+    presets:
+      - comments
+      - common-false-positives
+      - legacy
+      - std-error-handling
+    rules:
+      - linters:
+          - dogsled
+        path: _test\.go
+      - linters:
+          - unused
+        path: tools/.*
+    paths:
+      - third_party$
+      - builtin$
+      - examples$
+issues:
+  fix: false
+formatters:
+  enable:
+    - gofmt
+  exclusions:
+    generated: lax
+    paths:
+      - third_party$
+      - builtin$
+      - examples$

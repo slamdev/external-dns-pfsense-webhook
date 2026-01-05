@@ -1,0 +1,4 @@
+httpClientTimeout: 15m
+app:
+  autoStart: true
+  url: http://localhost:8080
