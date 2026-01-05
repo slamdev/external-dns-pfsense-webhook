@@ -9,14 +9,12 @@ type rndEndpointOpt func(endpoint *externaldnsapi.Endpoint)
 
 func RndEndpoint(opts ...rndEndpointOpt) externaldnsapi.Endpoint {
 	endpoint := externaldnsapi.Endpoint{
-		DnsName: integration.ToPointer(RndName() + ".com"),
-		ProviderSpecific: []externaldnsapi.ProviderSpecificProperty{
-			{
-				Name:  integration.ToPointer("description"),
-				Value: integration.ToPointer(RndName()),
-			},
+		DnsName: integration.ToPointer(RndName() + "." + RndName() + ".com"),
+		Labels: map[string]string{
+			"env": "test",
 		},
-		Targets: integration.ToPointer([]string{"1.1.1.1"}),
+		Targets:    integration.ToPointer([]string{"1.1.1.1"}),
+		RecordType: integration.ToPointer("A"),
 	}
 	for _, opt := range opts {
 		opt(&endpoint)

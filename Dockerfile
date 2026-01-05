@@ -5,6 +5,7 @@ ARG TARGETOS
 ARG TARGETARCH
 
 ENV HOME="/" \
+    XDG_CACHE_HOME="/tmp" \
     OS_ARCH="${TARGETARCH}" \
     OS_FLAVOUR="debian-12" \
     OS_NAME="linux"
