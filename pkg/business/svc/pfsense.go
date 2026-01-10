@@ -2,6 +2,7 @@ package svc
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -75,7 +76,7 @@ func (s *pfsenseService) ApplyChanges(ctx context.Context, toCreate []UnboundEnd
 		// replace existing host with updated host if it is marked for toUpdate
 		updateIndex := slices.IndexFunc(toUpdate, func(endpoint UnboundEndpoint) bool {
 			existingDNS, err := s.buildDNSName(existingHost.Host, existingHost.Domain)
-			return err != nil && existingDNS == endpoint.DNSName
+			return err == nil && existingDNS == endpoint.DNSName
 		})
 		if updateIndex != -1 {
 			var err error
@@ -83,6 +84,7 @@ func (s *pfsenseService) ApplyChanges(ctx context.Context, toCreate []UnboundEnd
 			if err != nil {
 				return fmt.Errorf("failed to convert endpoint %+v to host; %w", toUpdate[updateIndex], err)
 			}
+			toUpdate = append(toUpdate[:updateIndex], toUpdate[updateIndex+1:]...)
 		}
 
 		finalHosts = append(finalHosts, existingHost)
@@ -90,12 +92,19 @@ func (s *pfsenseService) ApplyChanges(ctx context.Context, toCreate []UnboundEnd
 		// remove entry from created hosts if it already exists
 		createIndex := slices.IndexFunc(toCreate, func(endpoint UnboundEndpoint) bool {
 			existingDNS, err := s.buildDNSName(existingHost.Host, existingHost.Domain)
-			return err != nil && existingDNS == endpoint.DNSName
+			return err == nil && existingDNS == endpoint.DNSName
 		})
 		if createIndex != -1 {
 			toCreate = append(toCreate[:createIndex], toCreate[createIndex+1:]...)
 		}
 	}
+
+	// create remaining updates (sometimes external-dns reports a new host as an update)
+	hostsToUpdate, err := integration.MapSliceErr(toUpdate, s.endpointToHost)
+	if err != nil {
+		return fmt.Errorf("failed to map endpoints to hosts for update; %w", err)
+	}
+	finalHosts = append(finalHosts, hostsToUpdate...)
 
 	// add remaining created hosts
 	hostsToCreate, err := integration.MapSliceErr(toCreate, s.endpointToHost)
@@ -184,7 +193,7 @@ func (s *pfsenseService) endpointToHost(endpoint UnboundEndpoint) (host, error) 
 		Host:   hostname,
 		Domain: domain,
 		Ip:     ip,
-		Descr:  string(description),
+		Descr:  base64.StdEncoding.EncodeToString(description),
 	}, nil
 }
 
@@ -197,24 +206,32 @@ func (s *pfsenseService) hostToEndpoint(host host) (UnboundEndpoint, error) {
 	recordType := "A"
 	targets := []string{host.Ip}
 	var labels map[string]string
+	var providerSpecific map[string]string
 
-	if host.Descr != "" && strings.HasPrefix(host.Descr, "{") {
-		var endpoint UnboundEndpoint
-		if err := json.Unmarshal([]byte(host.Descr), &endpoint); err != nil {
-			return UnboundEndpoint{}, fmt.Errorf("failed to unmarshal description %+v to endpoint; %w", host.Descr, err)
+	if host.Descr != "" {
+		decoded, err := base64.StdEncoding.DecodeString(host.Descr)
+		if err != nil {
+			slog.Warn("failed to decode base64 description", "descr", host.Descr, "dnsName", dnsName, "error", err)
+		} else {
+			var endpoint UnboundEndpoint
+			if err := json.Unmarshal(decoded, &endpoint); err != nil {
+				return UnboundEndpoint{}, fmt.Errorf("failed to unmarshal description %+v to endpoint; %w", host.Descr, err)
+			}
+			if endpoint.RecordType != "" {
+				recordType = endpoint.RecordType
+			}
+			targets = endpoint.Targets
+			labels = endpoint.Labels
+			providerSpecific = endpoint.ProviderSpecific
 		}
-		if endpoint.RecordType != "" {
-			recordType = endpoint.RecordType
-		}
-		targets = endpoint.Targets
-		labels = endpoint.Labels
 	}
 
 	return UnboundEndpoint{
-		DNSName:    dnsName,
-		Targets:    targets,
-		RecordType: recordType,
-		Labels:     labels,
+		DNSName:          dnsName,
+		Targets:          targets,
+		RecordType:       recordType,
+		Labels:           labels,
+		ProviderSpecific: providerSpecific,
 	}, nil
 }
 
@@ -243,10 +260,11 @@ func (s *pfsenseService) buildDNSName(host, domain string) (string, error) {
 }
 
 type UnboundEndpoint struct {
-	DNSName    string            `json:"dnsName"`
-	Targets    []string          `json:"targets,omitempty"`
-	Labels     map[string]string `json:"labels,omitempty"`
-	RecordType string            `json:"recordType"`
+	DNSName          string            `json:"dnsName"`
+	Targets          []string          `json:"targets,omitempty"`
+	Labels           map[string]string `json:"labels,omitempty"`
+	RecordType       string            `json:"recordType"`
+	ProviderSpecific map[string]string `json:"providerSpecific,omitempty"`
 }
 
 type unboundStruct struct {

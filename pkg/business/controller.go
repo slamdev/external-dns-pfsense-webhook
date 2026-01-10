@@ -77,18 +77,43 @@ func (c *controller) AdjustRecords(_ context.Context, request externaldnsapi.Adj
 
 func (c *controller) asExternalDNSEndpoint(endpoint svc.UnboundEndpoint) (externaldnsapi.Endpoint, error) {
 	return externaldnsapi.Endpoint{
-		DnsName:    &endpoint.DNSName,
-		Targets:    &endpoint.Targets,
-		RecordType: &endpoint.RecordType,
-		Labels:     endpoint.Labels,
+		DnsName:          &endpoint.DNSName,
+		Targets:          &endpoint.Targets,
+		RecordType:       &endpoint.RecordType,
+		Labels:           endpoint.Labels,
+		ProviderSpecific: c.fromProviderSpecificMap(endpoint.ProviderSpecific),
 	}, nil
 }
 
 func (c *controller) asUnboundEndpoint(endpoint externaldnsapi.Endpoint) (svc.UnboundEndpoint, error) {
 	return svc.UnboundEndpoint{
-		DNSName:    integration.FromPtr(endpoint.DnsName, ""),
-		Targets:    integration.FromPtr(endpoint.Targets, []string{}),
-		RecordType: integration.FromPtr(endpoint.RecordType, ""),
-		Labels:     endpoint.Labels,
+		DNSName:          integration.FromPtr(endpoint.DnsName, ""),
+		Targets:          integration.FromPtr(endpoint.Targets, []string{}),
+		RecordType:       integration.FromPtr(endpoint.RecordType, ""),
+		Labels:           endpoint.Labels,
+		ProviderSpecific: c.toProviderSpecificMap(endpoint.ProviderSpecific),
 	}, nil
+}
+
+func (c *controller) toProviderSpecificMap(values []externaldnsapi.ProviderSpecificProperty) map[string]string {
+	result := make(map[string]string)
+	for _, v := range values {
+		if v.Name != nil && *v.Name != "" && v.Value != nil && *v.Value != "" {
+			result[*v.Name] = *v.Value
+		}
+	}
+	return result
+}
+
+func (c *controller) fromProviderSpecificMap(values map[string]string) []externaldnsapi.ProviderSpecificProperty {
+	result := make([]externaldnsapi.ProviderSpecificProperty, 0, len(values))
+	for k, v := range values {
+		key := k
+		value := v
+		result = append(result, externaldnsapi.ProviderSpecificProperty{
+			Name:  &key,
+			Value: &value,
+		})
+	}
+	return result
 }

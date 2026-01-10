@@ -8,7 +8,8 @@ external-dns args:
 - --managed-record-types=A
 - --registry=txt
 - --txt-prefix=%{record_type}-prefix-
-- --txt-wildcard-replacement=wildcard
+- --regex-domain-filter='^.*$'
+- --regex-domain-exclusion='^\*\..*'
 ```
 
 webhook sidecar:
@@ -49,3 +50,19 @@ webhook sidecar:
       path: /ready
       port: monitoring
 ```
+
+Wildcard domains are excluded cause pfsence relies on custom unbound options to support them, this controller doesn't
+manage those.
+
+To manage wildcard domains you can add custom unbound options like:
+
+```yaml
+server:
+  local-zone: "sub.exmaple.com" redirect
+  local-data: "sub.exmaple.com 3600 IN A 10.1.10.1"
+```
+
+This will create a wildcard A record for `*.sub.example.com` pointing to `10.1.10.1`.
+
+Unbound record description is used to store external-dns metadata. Metadata is converted to JSON and then base64
+encoded. Encoding is required because unbound (or pfsense) sometimes converts `"` to `&quot;` which breaks JSON parsing.
