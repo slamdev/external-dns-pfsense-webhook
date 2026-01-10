@@ -108,11 +108,9 @@ func (c *controller) toProviderSpecificMap(values []externaldnsapi.ProviderSpeci
 func (c *controller) fromProviderSpecificMap(values map[string]string) []externaldnsapi.ProviderSpecificProperty {
 	result := make([]externaldnsapi.ProviderSpecificProperty, 0, len(values))
 	for k, v := range values {
-		key := k
-		value := v
 		result = append(result, externaldnsapi.ProviderSpecificProperty{
-			Name:  &key,
-			Value: &value,
+			Name:  &k,
+			Value: &v,
 		})
 	}
 	return result
