@@ -69,6 +69,11 @@ func (s *pfsenseService) ApplyChanges(ctx context.Context, toCreate []UnboundEnd
 		return err
 	}
 
+	if slices.Equal(finalHosts, section.Hosts) {
+		slog.InfoContext(ctx, "all records are already up to date")
+		return nil
+	}
+
 	if s.dryRun {
 		slog.InfoContext(ctx, "dry run enabled, not applying changes to pfsense",
 			slog.String("create", integration.ToUnsafeJSONString(toCreate)),
@@ -139,6 +144,8 @@ func (s *pfsenseService) reconcileHosts(ctx context.Context, existing []host, to
 			if err != nil {
 				return nil, fmt.Errorf("failed to convert endpoint %+v to host; %w", updatedEndpoint, err)
 			}
+			// aliases are configured in pfsense, not by external-dns, so an update must not drop them
+			updatedHost.Aliases = existingHost.Aliases
 			finalHosts = append(finalHosts, updatedHost)
 			applied[key] = struct{}{}
 			continue
