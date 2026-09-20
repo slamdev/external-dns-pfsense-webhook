@@ -94,10 +94,16 @@ func Test_reconcileHosts(t *testing.T) {
 			want:     []host{managedHost(t, aRecord("keep.adnz.co", "10.3.100.1")), managedHost(t, aRecord("new.adnz.co", "10.3.100.2"))},
 		},
 		{
-			name:     "create of a host that already exists keeps the stored one",
+			name:     "create of a host that already exists updates it rather than being dropped",
 			existing: []host{managedHost(t, aRecord("existing.adnz.co", "10.3.100.1"))},
 			toCreate: []UnboundEndpoint{aRecord("existing.adnz.co", "10.3.100.20")},
-			want:     []host{managedHost(t, aRecord("existing.adnz.co", "10.3.100.1"))},
+			want:     []host{managedHost(t, aRecord("existing.adnz.co", "10.3.100.20"))},
+		},
+		{
+			name:     "create of a host that already exists keeps its aliases",
+			existing: []host{withAliases(managedHost(t, aRecord("existing.adnz.co", "10.3.100.1")), "www.adnz.co")},
+			toCreate: []UnboundEndpoint{aRecord("existing.adnz.co", "10.3.100.20")},
+			want:     []host{withAliases(managedHost(t, aRecord("existing.adnz.co", "10.3.100.20")), "www.adnz.co")},
 		},
 		{
 			// external-dns re-sends unchanged records as updates every reconcile; recognising that
