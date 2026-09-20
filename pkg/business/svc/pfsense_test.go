@@ -76,6 +76,12 @@ func Test_reconcileHosts(t *testing.T) {
 			want:     []host{managedHost(t, aRecord("moved.adnz.co", "10.3.100.20")), managedHost(t, aRecord("keep.adnz.co", "10.3.100.2"))},
 		},
 		{
+			name:     "update keeps aliases configured in pfsense",
+			existing: []host{withAliases(managedHost(t, aRecord("aliased.adnz.co", "10.3.100.1")), "www.adnz.co")},
+			toUpdate: []UnboundEndpoint{aRecord("aliased.adnz.co", "10.3.100.20")},
+			want:     []host{withAliases(managedHost(t, aRecord("aliased.adnz.co", "10.3.100.20")), "www.adnz.co")},
+		},
+		{
 			name:     "an update for a host that does not exist yet is added",
 			existing: []host{managedHost(t, aRecord("keep.adnz.co", "10.3.100.1"))},
 			toUpdate: []UnboundEndpoint{aRecord("new.adnz.co", "10.3.100.2")},
@@ -92,6 +98,14 @@ func Test_reconcileHosts(t *testing.T) {
 			existing: []host{managedHost(t, aRecord("existing.adnz.co", "10.3.100.1"))},
 			toCreate: []UnboundEndpoint{aRecord("existing.adnz.co", "10.3.100.20")},
 			want:     []host{managedHost(t, aRecord("existing.adnz.co", "10.3.100.1"))},
+		},
+		{
+			// external-dns re-sends unchanged records as updates every reconcile; recognising that
+			// the result is identical is what lets ApplyChanges skip writing to pfsense at all
+			name:     "an update that changes nothing returns the stored hosts unchanged",
+			existing: []host{managedHost(t, aRecord("same.adnz.co", "10.3.100.1")), managedHost(t, txtRecord("a-prefix-same.adnz.co", "heritage=external-dns"))},
+			toUpdate: []UnboundEndpoint{aRecord("same.adnz.co", "10.3.100.1"), txtRecord("a-prefix-same.adnz.co", "heritage=external-dns")},
+			want:     []host{managedHost(t, aRecord("same.adnz.co", "10.3.100.1")), managedHost(t, txtRecord("a-prefix-same.adnz.co", "heritage=external-dns"))},
 		},
 		{
 			name: "deletes, updates and creates in one batch",
@@ -175,5 +189,10 @@ func managedHost(t *testing.T, endpoint UnboundEndpoint) host {
 	service := &pfsenseService{}
 	h, err := service.endpointToHost(endpoint)
 	require.NoError(t, err)
+	return h
+}
+
+func withAliases(h host, aliases string) host {
+	h.Aliases = aliases
 	return h
 }
