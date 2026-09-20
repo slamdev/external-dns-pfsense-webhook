@@ -63,73 +63,147 @@ func (s *pfsenseService) ApplyChanges(ctx context.Context, toCreate []UnboundEnd
 	if err != nil {
 		return fmt.Errorf("failed to fetch unbound section; %w", err)
 	}
-	var finalHosts []host
-	for _, existingHost := range section.Hosts {
-		// do not add an existing host for final host if it is marked for deletion
-		if slices.ContainsFunc(toDelete, func(endpoint UnboundEndpoint) bool {
-			existingDNS, err := s.buildDNSName(existingHost.Host, existingHost.Domain)
-			return err != nil && existingDNS == endpoint.DNSName
-		}) {
-			continue
-		}
 
-		// replace existing host with updated host if it is marked for toUpdate
-		updateIndex := slices.IndexFunc(toUpdate, func(endpoint UnboundEndpoint) bool {
-			existingDNS, err := s.buildDNSName(existingHost.Host, existingHost.Domain)
-			return err == nil && existingDNS == endpoint.DNSName
-		})
-		if updateIndex != -1 {
-			var err error
-			existingHost, err = s.endpointToHost(toUpdate[updateIndex])
-			if err != nil {
-				return fmt.Errorf("failed to convert endpoint %+v to host; %w", toUpdate[updateIndex], err)
-			}
-			toUpdate = append(toUpdate[:updateIndex], toUpdate[updateIndex+1:]...)
-		}
-
-		finalHosts = append(finalHosts, existingHost)
-
-		// remove entry from created hosts if it already exists
-		createIndex := slices.IndexFunc(toCreate, func(endpoint UnboundEndpoint) bool {
-			existingDNS, err := s.buildDNSName(existingHost.Host, existingHost.Domain)
-			return err == nil && existingDNS == endpoint.DNSName
-		})
-		if createIndex != -1 {
-			toCreate = append(toCreate[:createIndex], toCreate[createIndex+1:]...)
-		}
-	}
-
-	// create remaining updates (sometimes external-dns reports a new host as an update)
-	hostsToUpdate, err := integration.MapSliceErr(toUpdate, s.endpointToHost)
+	finalHosts, err := s.reconcileHosts(ctx, section.Hosts, toCreate, toUpdate, toDelete)
 	if err != nil {
-		return fmt.Errorf("failed to map endpoints to hosts for update; %w", err)
+		return err
 	}
-	finalHosts = append(finalHosts, hostsToUpdate...)
-
-	// add remaining created hosts
-	hostsToCreate, err := integration.MapSliceErr(toCreate, s.endpointToHost)
-	if err != nil {
-		return fmt.Errorf("failed to map endpoints to hosts for creation; %w", err)
-	}
-
-	finalHosts = append(finalHosts, hostsToCreate...)
-
-	section.Hosts = finalHosts
 
 	if s.dryRun {
 		slog.InfoContext(ctx, "dry run enabled, not applying changes to pfsense",
 			slog.String("create", integration.ToUnsafeJSONString(toCreate)),
 			slog.String("update", integration.ToUnsafeJSONString(toUpdate)),
 			slog.String("delete", integration.ToUnsafeJSONString(toDelete)),
-			slog.String("final", integration.ToUnsafeJSONString(section.Hosts)),
+			slog.String("final", integration.ToUnsafeJSONString(finalHosts)),
 		)
 		return nil
 	}
+
+	section.Hosts = finalHosts
 
 	if err := s.saveUnboundSection(section); err != nil {
 		return fmt.Errorf("failed to save unbound section; %w", err)
 	}
 	return nil
+}
+
+// reconcileHosts folds the requested changes into the host list currently stored in pfsense and
+// returns the list that should replace it. It performs no I/O: given the same inputs it always
+// returns the same output.
+//
+// Hosts are matched on dns name *and* record type, because pfsense keeps A and TXT records in the
+// same host override list. Hosts that carry no description written by this webhook are treated as
+// not ours: they are always kept as they are, never deleted and never rewritten.
+func (s *pfsenseService) reconcileHosts(ctx context.Context, existing []host, toCreate, toUpdate, toDelete []UnboundEndpoint) ([]host, error) {
+	deleteByKey := endpointsByKey(toDelete)
+	updateByKey := endpointsByKey(toUpdate)
+	createByKey := endpointsByKey(toCreate)
+
+	// keys already represented in finalHosts, so the leftover passes below do not add them twice
+	applied := make(map[string]struct{}, len(toUpdate)+len(toCreate))
+
+	var finalHosts []host
+	for _, existingHost := range existing {
+		dnsName, err := s.buildDNSName(existingHost.Host, existingHost.Domain)
+		if err != nil {
+			// we cannot tell what this host is, so we cannot safely change it
+			slog.WarnContext(ctx, "keeping host with an unexpected name", "host", existingHost.Host, "domain", existingHost.Domain, "error", err)
+			finalHosts = append(finalHosts, existingHost)
+			continue
+		}
+
+		storedEndpoint, ours := s.decodeHostDescr(existingHost)
+		key := hostKey(dnsName, recordTypeOrDefault(storedEndpoint.RecordType))
+
+		_, wantDelete := deleteByKey[key]
+		updatedEndpoint, wantUpdate := updateByKey[key]
+		_, wantCreate := createByKey[key]
+
+		if !ours {
+			if wantDelete || wantUpdate || wantCreate {
+				slog.WarnContext(ctx, "refusing to change a host that is not managed by this webhook", "dnsName", dnsName)
+			}
+			// claim the key so a create for the same name does not add a duplicate override
+			applied[key] = struct{}{}
+			finalHosts = append(finalHosts, existingHost)
+			continue
+		}
+
+		if wantDelete {
+			// leaving it out of finalHosts is what deletes it
+			continue
+		}
+
+		if wantUpdate {
+			updatedHost, err := s.endpointToHost(updatedEndpoint)
+			if err != nil {
+				return nil, fmt.Errorf("failed to convert endpoint %+v to host; %w", updatedEndpoint, err)
+			}
+			finalHosts = append(finalHosts, updatedHost)
+			applied[key] = struct{}{}
+			continue
+		}
+
+		if wantCreate {
+			// it already exists; keep the stored host and drop the create
+			applied[key] = struct{}{}
+		}
+
+		finalHosts = append(finalHosts, existingHost)
+	}
+
+	// sometimes external-dns reports a new host as an update
+	leftovers, err := s.hostsForUnappliedEndpoints(toUpdate, applied)
+	if err != nil {
+		return nil, fmt.Errorf("failed to map endpoints to hosts for update; %w", err)
+	}
+	finalHosts = append(finalHosts, leftovers...)
+
+	created, err := s.hostsForUnappliedEndpoints(toCreate, applied)
+	if err != nil {
+		return nil, fmt.Errorf("failed to map endpoints to hosts for creation; %w", err)
+	}
+	finalHosts = append(finalHosts, created...)
+
+	return finalHosts, nil
+}
+
+func (s *pfsenseService) hostsForUnappliedEndpoints(endpoints []UnboundEndpoint, applied map[string]struct{}) ([]host, error) {
+	var hosts []host
+	for _, endpoint := range endpoints {
+		key := hostKey(endpoint.DNSName, recordTypeOrDefault(endpoint.RecordType))
+		if _, ok := applied[key]; ok {
+			continue
+		}
+		newHost, err := s.endpointToHost(endpoint)
+		if err != nil {
+			return nil, err
+		}
+		hosts = append(hosts, newHost)
+		applied[key] = struct{}{}
+	}
+	return hosts, nil
+}
+
+func endpointsByKey(endpoints []UnboundEndpoint) map[string]UnboundEndpoint {
+	byKey := make(map[string]UnboundEndpoint, len(endpoints))
+	for _, endpoint := range endpoints {
+		byKey[hostKey(endpoint.DNSName, recordTypeOrDefault(endpoint.RecordType))] = endpoint
+	}
+	return byKey
+}
+
+// hostKey identifies a record: pfsense stores A and TXT records in the same list, so the dns name
+// alone is not enough to tell them apart.
+func hostKey(dnsName, recordType string) string {
+	return dnsName + "|" + recordType
+}
+
+func recordTypeOrDefault(recordType string) string {
+	if recordType == "" {
+		return "A"
+	}
+	return recordType
 }
 
 func (s *pfsenseService) saveUnboundSection(section unbound) error {
@@ -203,36 +277,44 @@ func (s *pfsenseService) hostToEndpoint(host host) (UnboundEndpoint, error) {
 		return UnboundEndpoint{}, fmt.Errorf("failed to build dns name from host %+v; %w", host, err)
 	}
 
-	recordType := "A"
-	targets := []string{host.Ip}
-	var labels map[string]string
-	var providerSpecific map[string]string
-
-	if host.Descr != "" {
-		decoded, err := base64.StdEncoding.DecodeString(host.Descr)
-		if err != nil {
-			slog.Warn("failed to decode base64 description", "descr", host.Descr, "dnsName", dnsName, "error", err)
-		} else {
-			var endpoint UnboundEndpoint
-			if err := json.Unmarshal(decoded, &endpoint); err != nil {
-				return UnboundEndpoint{}, fmt.Errorf("failed to unmarshal description %+v to endpoint; %w", host.Descr, err)
-			}
-			if endpoint.RecordType != "" {
-				recordType = endpoint.RecordType
-			}
-			targets = endpoint.Targets
-			labels = endpoint.Labels
-			providerSpecific = endpoint.ProviderSpecific
-		}
+	storedEndpoint, ours := s.decodeHostDescr(host)
+	if !ours {
+		// a host override configured in pfsense itself; all we know is the name it resolves to
+		return UnboundEndpoint{
+			DNSName:    dnsName,
+			Targets:    []string{host.Ip},
+			RecordType: "A",
+		}, nil
 	}
 
 	return UnboundEndpoint{
 		DNSName:          dnsName,
-		Targets:          targets,
-		RecordType:       recordType,
-		Labels:           labels,
-		ProviderSpecific: providerSpecific,
+		Targets:          storedEndpoint.Targets,
+		RecordType:       recordTypeOrDefault(storedEndpoint.RecordType),
+		Labels:           storedEndpoint.Labels,
+		ProviderSpecific: storedEndpoint.ProviderSpecific,
 	}, nil
+}
+
+// decodeHostDescr reads back the endpoint this webhook stored in the host description when it wrote
+// the host. The second return value reports whether the host is managed by this webhook: a host with
+// no description, or one whose description we cannot read, belongs to whoever configured it in
+// pfsense and must be left alone.
+func (s *pfsenseService) decodeHostDescr(host host) (UnboundEndpoint, bool) {
+	if host.Descr == "" {
+		return UnboundEndpoint{}, false
+	}
+	decoded, err := base64.StdEncoding.DecodeString(host.Descr)
+	if err != nil {
+		slog.Warn("failed to decode base64 description", "descr", host.Descr, "host", host.Host, "domain", host.Domain, "error", err)
+		return UnboundEndpoint{}, false
+	}
+	var endpoint UnboundEndpoint
+	if err := json.Unmarshal(decoded, &endpoint); err != nil {
+		slog.Warn("failed to unmarshal description to endpoint", "descr", host.Descr, "host", host.Host, "domain", host.Domain, "error", err)
+		return UnboundEndpoint{}, false
+	}
+	return endpoint, true
 }
 
 func (s *pfsenseService) explodeHostName(hostName string) (string, string, error) {
