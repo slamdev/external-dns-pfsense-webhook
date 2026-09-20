@@ -121,11 +121,15 @@ func (s *pfsenseService) reconcileHosts(ctx context.Context, existing []host, to
 		key := hostKey(dnsName, recordTypeOrDefault(storedEndpoint.RecordType))
 
 		_, wantDelete := deleteByKey[key]
-		updatedEndpoint, wantUpdate := updateByKey[key]
-		_, wantCreate := createByKey[key]
+		newEndpoint, wantWrite := updateByKey[key]
+		if !wantWrite {
+			// a create for a host that already exists is an update: external-dns wants the record to
+			// hold the target it asked for, whether or not it knew the host was there already
+			newEndpoint, wantWrite = createByKey[key]
+		}
 
 		if !ours {
-			if wantDelete || wantUpdate || wantCreate {
+			if wantDelete || wantWrite {
 				slog.WarnContext(ctx, "refusing to change a host that is not managed by this webhook", "dnsName", dnsName)
 			}
 			// claim the key so a create for the same name does not add a duplicate override
@@ -139,21 +143,16 @@ func (s *pfsenseService) reconcileHosts(ctx context.Context, existing []host, to
 			continue
 		}
 
-		if wantUpdate {
-			updatedHost, err := s.endpointToHost(updatedEndpoint)
+		if wantWrite {
+			newHost, err := s.endpointToHost(newEndpoint)
 			if err != nil {
-				return nil, fmt.Errorf("failed to convert endpoint %+v to host; %w", updatedEndpoint, err)
+				return nil, fmt.Errorf("failed to convert endpoint %+v to host; %w", newEndpoint, err)
 			}
-			// aliases are configured in pfsense, not by external-dns, so an update must not drop them
-			updatedHost.Aliases = existingHost.Aliases
-			finalHosts = append(finalHosts, updatedHost)
+			// aliases are configured in pfsense, not by external-dns, so a write must not drop them
+			newHost.Aliases = existingHost.Aliases
+			finalHosts = append(finalHosts, newHost)
 			applied[key] = struct{}{}
 			continue
-		}
-
-		if wantCreate {
-			// it already exists; keep the stored host and drop the create
-			applied[key] = struct{}{}
 		}
 
 		finalHosts = append(finalHosts, existingHost)
